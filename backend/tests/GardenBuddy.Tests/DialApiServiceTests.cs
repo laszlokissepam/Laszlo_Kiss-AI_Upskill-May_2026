@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using GardenBuddy.Application.Configuration;
 using GardenBuddy.Application.Dial;
 using GardenBuddy.Infrastructure.Services;
@@ -100,7 +101,7 @@ public class DialApiServiceTests
 						{
 							category = new { type = "string" }
 						}
-					})))
+					}))
 		};
 
 		await service.SendChatCompletionRequestAsync(
