@@ -1,0 +1,15 @@
+# Ignore build output directories
+bin/
+obj/
+
+# Ignore local database files
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+
+# Ignore user-specific Visual Studio/IDE settings
+.vscode/
+*.user
+*.csproj.user

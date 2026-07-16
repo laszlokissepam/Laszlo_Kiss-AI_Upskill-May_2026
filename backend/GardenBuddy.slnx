@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GardenBuddy.Api/GardenBuddy.Api.csproj" />
+    <Project Path="src/GardenBuddy.Application/GardenBuddy.Application.csproj" />
+    <Project Path="src/GardenBuddy.Domain/GardenBuddy.Domain.csproj" />
+    <Project Path="src/GardenBuddy.Infrastructure/GardenBuddy.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GardenBuddy.Tests/GardenBuddy.Tests.csproj" />
+  </Folder>
+</Solution>
