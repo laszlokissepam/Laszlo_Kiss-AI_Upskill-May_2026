@@ -154,6 +154,8 @@ Do not rewrite unrelated files.
 
 ### Milestone 1
 
+Status: Done
+
 - Create the .NET solution.
 - Create API, Application, Domain, Infrastructure, and Tests projects.
 - Configure EF Core and SQLite.
@@ -163,6 +165,16 @@ Do not rewrite unrelated files.
 - Add tests.
 
 ### Milestone 2
+
+Status: Done
+
+- Import sample product data.
+- Implement product search without AI.
+- Add product filtering tests.
+
+### Milestone 3
+
+Status: Done
 
 - Integrate the EPAM DIAL API.
 - Implement controlled tool calling.
@@ -176,9 +188,11 @@ Current implementation notes:
 - DIAL chat completion backend routes: `POST /api/dial/chat-completion` and `POST /api/dial/chat-completions`.
 - Provider target: `/openai/deployments/{deployment_name}/chat/completions?api-version=2024-10-21`.
 - Auth: `DIAL_API_KEY` environment variable has priority over `Dial:ApiKey` config fallback.
-- Request and response contracts include optional tool-calling payloads (`tools`, `tool_choice`, `tool_calls`).
+- Request and response contracts include optional tool-calling payloads (`tools`, `tool_choice`, `parallel_tool_calls`, `tool_calls`).
 
-### Milestone 3
+### Milestone 4
+
+Status: Planned
 
 - Ingest Markdown documents.
 - Split documents into searchable chunks.
@@ -186,14 +200,25 @@ Current implementation notes:
 - Implement semantic knowledge retrieval.
 - Expose knowledge search as an AI tool.
 
-### Milestone 4
+### Milestone 5
+
+Status: Planned
 
 - Support mixed structured and unstructured questions.
 - Create the Angular chat frontend.
 - Display answer sources.
 - Add loading and error states.
 
-### Milestone 5
+### Milestone 6
+
+Status: Planned
+
+- Integrate the frontend with backend chat APIs.
+- Refine user experience and error handling.
+
+### Milestone 7
+
+Status: Planned
 
 - Finalize tests.
 - Complete architecture documentation.

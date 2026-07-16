@@ -32,7 +32,8 @@ public sealed record DialChatCompletionRequest(
     [property: JsonPropertyName("top_p")] int TopP,
     [property: JsonPropertyName("max_tokens")] int MaxTokens,
     [property: JsonPropertyName("tools")] IReadOnlyCollection<DialToolDefinition>? Tools = null,
-    [property: JsonPropertyName("tool_choice")] string? ToolChoice = null);
+    [property: JsonPropertyName("tool_choice")] object? ToolChoice = null,
+    [property: JsonPropertyName("parallel_tool_calls")] bool? ParallelToolCalls = null);
 
 public sealed record DialChatCompletionChoice(
     [property: JsonPropertyName("index")] int Index,

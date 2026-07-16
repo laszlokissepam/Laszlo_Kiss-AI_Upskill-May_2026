@@ -10,6 +10,7 @@ public interface IDialApiService
 		double temperature,
 		int maxTokens,
 		IReadOnlyCollection<DialToolDefinition>? tools = null,
-		string? toolChoice = null,
+		object? toolChoice = null,
+		bool? parallelToolCalls = null,
 		CancellationToken cancellationToken = default);
 }

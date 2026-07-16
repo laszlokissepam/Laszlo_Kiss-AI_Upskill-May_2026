@@ -59,15 +59,15 @@ garden-buddy/
 
 The `backend`, `frontend`, and `data` folders will be created during implementation.
 
-## Planned Milestones
+## Milestone Status
 
-1. Create the ASP.NET Core solution and SQL data layer.
-2. Import sample product data and implement product search.
-3. Integrate the EPAM DIAL API and tool calling.
-4. Add document ingestion, embeddings, and semantic retrieval.
-5. Add mixed structured and unstructured question support.
-6. Create a simple Angular chat interface.
-7. Add automated tests, documentation, and final demo materials.
+1. [Done] Create the ASP.NET Core solution and SQL data layer.
+2. [Done] Import sample product data and implement product search.
+3. [Done] Integrate the EPAM DIAL API and tool calling.
+4. [Planned] Add document ingestion, embeddings, and semantic retrieval.
+5. [Planned] Add mixed structured and unstructured question support.
+6. [Planned] Create a simple Angular chat interface.
+7. [Planned] Add automated tests, documentation, and final demo materials.
 
 ## Local Development
 
@@ -90,11 +90,13 @@ Backend API endpoints:
 - `POST /api/dial/chat-completion`
 - `POST /api/dial/chat-completions`
 
-Both routes forward requests to the DIAL chat completion API and support optional tool-calling fields (`tools`, `tool_choice`) for controlled backend function workflows.
+Both routes forward requests to the DIAL chat completion API and support optional tool-calling fields (`tools`, `tool_choice`, `parallel_tool_calls`) for controlled backend function workflows.
 
 Request validation and failure handling:
 
-- Validates deployment name, message presence, max token range, and tool definition shape.
+- Validates deployment name, message presence, temperature range, max token range, and tool definition schema.
+- Supports `tool_choice` literals (`auto`, `none`, `required`) and specific function targeting via object shape.
+- Enforces tool definition limits (maximum 128 tools) and validates tool schema consistency.
 - Resolves API key from `DIAL_API_KEY` first, then falls back to `Dial:ApiKey`.
 - Maps provider failures (`400`, `401`, `500`) into controlled API errors.
 

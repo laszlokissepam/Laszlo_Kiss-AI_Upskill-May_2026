@@ -5,6 +5,7 @@ using System.Text.Json;
 using GardenBuddy.Application.Configuration;
 using GardenBuddy.Application.Dial;
 using GardenBuddy.Infrastructure.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace GardenBuddy.Tests;
@@ -60,7 +61,7 @@ public class DialApiServiceTests
 		Assert.True(capturedRequest.Headers.TryGetValues("X-CACHE-POLICY", out var cacheValues));
 		Assert.Contains("availability-priority", cacheValues!);
 
-		var requestContent = await capturedRequest.Content!.ReadAsStringAsync();
+		var requestContent = handler.RequestBodies.Single();
 		Assert.Contains("\"model\":\"gpt-4\"", requestContent);
 		Assert.Contains("\"temperature\":0.5", requestContent);
 		Assert.Contains("\"top_p\":1", requestContent);
@@ -110,13 +111,59 @@ public class DialApiServiceTests
 			0.2,
 			120,
 			tools,
-			"auto");
+			"auto",
+			true);
 
 		Assert.NotNull(capturedRequest);
-		var requestContent = await capturedRequest!.Content!.ReadAsStringAsync();
+		var requestContent = handler.RequestBodies.Single();
 		Assert.Contains("\"tools\":[", requestContent);
 		Assert.Contains("\"name\":\"SearchProducts\"", requestContent);
 		Assert.Contains("\"tool_choice\":\"auto\"", requestContent);
+		Assert.Contains("\"parallel_tool_calls\":true", requestContent);
+	}
+
+	[Fact]
+	public async Task SendChatCompletionRequestAsync_IncludesSpecificToolChoiceObject_WhenProvided()
+	{
+		var handler = new FakeHttpMessageHandler(_ =>
+			new HttpResponseMessage(HttpStatusCode.OK)
+			{
+				Content = new StringContent("{\"id\":\"id\",\"model\":\"gpt-4\",\"choices\":[]}", Encoding.UTF8, "application/json")
+			});
+
+		var service = CreateService(handler, CreateOptions());
+		var tools = new[]
+		{
+			new DialToolDefinition(
+				"function",
+				new DialToolDefinitionFunction(
+					"SearchProducts",
+					"Search products",
+					new
+					{
+						type = "object",
+						properties = new { category = new { type = "string" } }
+					}))
+		};
+
+		await service.SendChatCompletionRequestAsync(
+			"deployment",
+			new[] { new DialChatMessage("user", "find plants") },
+			0.2,
+			120,
+			tools,
+			new
+			{
+				type = "function",
+				function = new
+				{
+					name = "SearchProducts"
+				}
+			});
+
+		var requestContent = handler.RequestBodies.Single();
+		Assert.Contains("\"tool_choice\":{", requestContent);
+		Assert.Contains("\"name\":\"SearchProducts\"", requestContent);
 	}
 
 	[Fact]
@@ -278,6 +325,80 @@ public class DialApiServiceTests
 	}
 
 	[Fact]
+	public async Task SendChatCompletionRequestAsync_Throws_WhenTooManyToolsProvided()
+	{
+		var service = CreateService(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)), CreateOptions());
+		var tools = Enumerable.Range(0, 129)
+			.Select(i => new DialToolDefinition(
+				"function",
+				new DialToolDefinitionFunction(
+					$"Tool{i}",
+					"desc",
+					new
+					{
+						type = "object",
+						properties = new { query = new { type = "string" } }
+					})))
+			.ToArray();
+
+		await Assert.ThrowsAsync<ArgumentException>(() =>
+			service.SendChatCompletionRequestAsync(
+				"deployment",
+				new[] { new DialChatMessage("user", "hello") },
+				0.2,
+				100,
+				tools,
+				"auto"));
+	}
+
+	[Fact]
+	public async Task SendChatCompletionRequestAsync_Throws_WhenToolChoiceLiteralIsInvalid()
+	{
+		var service = CreateService(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)), CreateOptions());
+
+		await Assert.ThrowsAsync<ArgumentException>(() =>
+			service.SendChatCompletionRequestAsync(
+				"deployment",
+				new[] { new DialChatMessage("user", "hello") },
+				0.2,
+				100,
+				null,
+				"sometimes"));
+	}
+
+	[Fact]
+	public async Task SendChatCompletionRequestAsync_Throws_WhenSpecificToolChoiceDoesNotMatchDefinedTools()
+	{
+		var service = CreateService(new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)), CreateOptions());
+		var tools = new[]
+		{
+			new DialToolDefinition(
+				"function",
+				new DialToolDefinitionFunction(
+					"SearchProducts",
+					"Search products",
+					new
+					{
+						type = "object",
+						properties = new { category = new { type = "string" } }
+					}))
+		};
+
+		await Assert.ThrowsAsync<ArgumentException>(() =>
+			service.SendChatCompletionRequestAsync(
+				"deployment",
+				new[] { new DialChatMessage("user", "hello") },
+				0.2,
+				100,
+				tools,
+				new
+				{
+					type = "function",
+					function = new { name = "UnknownTool" }
+				}));
+	}
+
+	[Fact]
 	public async Task SendChatCompletionRequestAsync_Throws_WhenApiKeyMissing()
 	{
 		var handler = new FakeHttpMessageHandler(_ =>
@@ -305,7 +426,7 @@ public class DialApiServiceTests
 			BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/")
 		};
 
-		return new DialApiService(client, Options.Create(options));
+		return new DialApiService(client, Options.Create(options), NullLogger<DialApiService>.Instance);
 	}
 
 	private static DialApiOptions CreateOptions() => new()
@@ -328,11 +449,17 @@ public class DialApiServiceTests
 		}
 
 		public List<HttpRequestMessage> Requests { get; } = new();
+		public List<string> RequestBodies { get; } = new();
 
-		protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
 		{
+			if (request.Content is not null)
+			{
+				RequestBodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+			}
+
 			Requests.Add(request);
-			return Task.FromResult(_handler(request));
+			return _handler(request);
 		}
 	}
 }
