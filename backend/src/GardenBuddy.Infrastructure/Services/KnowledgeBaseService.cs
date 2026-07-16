@@ -91,7 +91,7 @@ public sealed partial class KnowledgeBaseService : IKnowledgeBaseService
 	{
 		await EnsureCacheLoadedAsync(cancellationToken);
 
-		var documentsPath = Path.GetFullPath(_options.DocumentsPath);
+		var documentsPath = ResolveDirectoryPath(_options.DocumentsPath);
 		if (!Directory.Exists(documentsPath))
 		{
 			_chunks.Clear();
@@ -146,7 +146,7 @@ public sealed partial class KnowledgeBaseService : IKnowledgeBaseService
 			return;
 		}
 
-		var cachePath = Path.GetFullPath(_options.EmbeddingCachePath);
+		var cachePath = ResolveFilePath(_options.EmbeddingCachePath);
 		if (File.Exists(cachePath))
 		{
 			var json = await File.ReadAllTextAsync(cachePath, cancellationToken);
@@ -162,7 +162,7 @@ public sealed partial class KnowledgeBaseService : IKnowledgeBaseService
 
 	private async Task PersistCacheAsync(CancellationToken cancellationToken)
 	{
-		var cachePath = Path.GetFullPath(_options.EmbeddingCachePath);
+		var cachePath = ResolveFilePath(_options.EmbeddingCachePath);
 		var directory = Path.GetDirectoryName(cachePath);
 		if (!string.IsNullOrWhiteSpace(directory))
 		{
@@ -248,6 +248,68 @@ public sealed partial class KnowledgeBaseService : IKnowledgeBaseService
 	{
 		var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
 		return Convert.ToHexString(bytes);
+	}
+
+	private static string ResolveDirectoryPath(string configuredPath)
+	{
+		if (Path.IsPathRooted(configuredPath))
+		{
+			return Path.GetFullPath(configuredPath);
+		}
+
+		var fromCurrentDirectory = TryResolveByWalkingParents(Directory.GetCurrentDirectory(), configuredPath, Directory.Exists);
+		if (!string.IsNullOrWhiteSpace(fromCurrentDirectory))
+		{
+			return fromCurrentDirectory;
+		}
+
+		var fromBaseDirectory = TryResolveByWalkingParents(AppContext.BaseDirectory, configuredPath, Directory.Exists);
+		if (!string.IsNullOrWhiteSpace(fromBaseDirectory))
+		{
+			return fromBaseDirectory;
+		}
+
+		return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), configuredPath));
+	}
+
+	private static string ResolveFilePath(string configuredPath)
+	{
+		if (Path.IsPathRooted(configuredPath))
+		{
+			return Path.GetFullPath(configuredPath);
+		}
+
+		var fromCurrentDirectory = TryResolveByWalkingParents(Directory.GetCurrentDirectory(), configuredPath, File.Exists);
+		if (!string.IsNullOrWhiteSpace(fromCurrentDirectory))
+		{
+			return fromCurrentDirectory;
+		}
+
+		var fromBaseDirectory = TryResolveByWalkingParents(AppContext.BaseDirectory, configuredPath, File.Exists);
+		if (!string.IsNullOrWhiteSpace(fromBaseDirectory))
+		{
+			return fromBaseDirectory;
+		}
+
+		return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), configuredPath));
+	}
+
+	private static string? TryResolveByWalkingParents(string startDirectory, string relativePath, Func<string, bool> existsPredicate)
+	{
+		var current = new DirectoryInfo(startDirectory);
+
+		while (current is not null)
+		{
+			var candidate = Path.GetFullPath(Path.Combine(current.FullName, relativePath));
+			if (existsPredicate(candidate))
+			{
+				return candidate;
+			}
+
+			current = current.Parent;
+		}
+
+		return null;
 	}
 
 	[GeneratedRegex(@"(?m)^#{1,6}\s*|`|\*\*?|\[(.*?)\]\((.*?)\)")]

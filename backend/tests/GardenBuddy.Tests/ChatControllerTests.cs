@@ -232,6 +232,164 @@ public class ChatControllerTests
 		Assert.Equal(1, dial.CallCount);
 	}
 
+	[Fact]
+	public async Task PostAsync_UsesKnowledgeFallback_WhenToolCallsYieldNoSourcesButKnowledgeMatches()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_products",
+								"function",
+								new DialToolFunction("SearchProducts", "{\"name\":\"lavender\",\"inStockOnly\":true,\"topK\":3}"))
+						}),
+					"tool_calls")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Delivery takes 1 to 3 business days for in-stock items."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService
+		{
+			Results = new[]
+			{
+				new KnowledgeSearchResult("store-policies.md", "store-policies.md#chunk-1", "Delivery usually takes 1 to 3 business days.", 0.91)
+			}
+		};
+
+		var controller = new ChatController(dial, knowledge, new FakeProductService());
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "What is your delivery policy and how long does shipping take?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Contains("business days", payload.Answer, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains(payload.Sources, source => source.Kind == "unstructured" && source.Source == "store-policies.md");
+		Assert.Equal(2, dial.CallCount);
+	}
+
+	[Fact]
+	public async Task PostAsync_UsesPolicyKeywordFallback_ForHungarianDeliveryQuestion()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_products",
+								"function",
+								new DialToolFunction("SearchProducts", "{\"name\":\"lavender\",\"inStockOnly\":true,\"topK\":3}"))
+						}),
+					"tool_calls")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "A házhozszállítás in-stock termékekre 1-3 munkanap."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService
+		{
+			SearchHandler = query => query.Contains("delivery policy shipping time home delivery", StringComparison.OrdinalIgnoreCase)
+				? new[]
+				{
+					new KnowledgeSearchResult("store-policies.md", "store-policies.md#chunk-1", "Delivery usually takes 1 to 3 business days.", 0.32)
+				}
+				: Array.Empty<KnowledgeSearchResult>()
+		};
+
+		var controller = new ChatController(dial, knowledge, new FakeProductService());
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "Van házhozszállítás, és mennyi idő?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Contains(payload.Sources, source => source.Kind == "unstructured" && source.Source == "store-policies.md");
+		Assert.Contains(knowledge.SearchedQueries, q => q.Contains("delivery policy shipping time home delivery", StringComparison.OrdinalIgnoreCase));
+		Assert.Equal(2, dial.CallCount);
+	}
+
+	[Fact]
+	public async Task PostAsync_FiltersOutLowScoreKnowledgeSources()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_knowledge",
+								"function",
+								new DialToolFunction("SearchKnowledgeBase", "{\"query\":\"delivery policy\",\"topK\":3}"))
+						}),
+					"tool_calls")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Delivery takes 1 to 3 business days."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService
+		{
+			Results = new[]
+			{
+				new KnowledgeSearchResult("store-policies.md", "store-policies.md#chunk-1", "Delivery usually takes 1 to 3 business days.", 0.39),
+				new KnowledgeSearchResult("plant-care.md", "plant-care.md#chunk-1", "Watering guidance.", 0.08)
+			}
+		};
+
+		var controller = new ChatController(dial, knowledge, new FakeProductService());
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "What is your delivery policy and how long does shipping take?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Single(payload.Sources);
+		Assert.Equal("store-policies.md", payload.Sources.First().Source);
+	}
+
 	private sealed class FakeDialApiService : IDialApiService
 	{
 		private readonly Queue<DialChatCompletionResponse> _responses = new();
@@ -266,6 +424,8 @@ public class ChatControllerTests
 	private sealed class FakeKnowledgeBaseService : IKnowledgeBaseService
 	{
 		public IReadOnlyCollection<KnowledgeSearchResult> Results { get; set; } = Array.Empty<KnowledgeSearchResult>();
+		public Func<string, IReadOnlyCollection<KnowledgeSearchResult>>? SearchHandler { get; set; }
+		public List<string> SearchedQueries { get; } = new();
 
 		public Task<KnowledgeIngestionResult> IngestMarkdownDocumentsAsync(CancellationToken cancellationToken = default)
 		{
@@ -274,7 +434,9 @@ public class ChatControllerTests
 
 		public Task<IReadOnlyCollection<KnowledgeSearchResult>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
 		{
-			return Task.FromResult(Results);
+			SearchedQueries.Add(query);
+			var result = SearchHandler?.Invoke(query) ?? Results;
+			return Task.FromResult(result);
 		}
 	}
 

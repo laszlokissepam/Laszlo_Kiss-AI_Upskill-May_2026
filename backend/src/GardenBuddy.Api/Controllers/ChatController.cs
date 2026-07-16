@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GardenBuddy.Application.Abstractions;
 using GardenBuddy.Application.Dial;
+using GardenBuddy.Application.Knowledge;
 using GardenBuddy.Application.Products;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,6 +13,13 @@ public sealed class ChatController : ControllerBase
 {
 	private const string SearchProductsTool = "SearchProducts";
 	private const string SearchKnowledgeBaseTool = "SearchKnowledgeBase";
+	private const double KnowledgeFallbackMinScore = 0.35;
+	private const double MinimumUnstructuredSourceScore = 0.15;
+	private static readonly string[] PolicyKeywords =
+	[
+		"policy", "delivery", "shipping", "return", "refund", "opening", "payment",
+		"szall", "házhoz", "vissza", "nyitvatart", "fizet"
+	];
 
 	private readonly IDialApiService _dialApiService;
 	private readonly IKnowledgeBaseService _knowledgeBaseService;
@@ -109,6 +117,12 @@ public sealed class ChatController : ControllerBase
 
 				if (firstAssistant.ToolCalls is null || firstAssistant.ToolCalls.Count == 0)
 				{
+					var fallbackResponse = await TryKnowledgeFallbackAsync(request, cancellationToken);
+					if (fallbackResponse is not null)
+					{
+						return Ok(fallbackResponse);
+					}
+
 					return Ok(new ChatResponse(
 						"I could not retrieve reliable structured or knowledge-base data for this request.",
 						Array.Empty<ChatSource>()));
@@ -126,6 +140,12 @@ public sealed class ChatController : ControllerBase
 
 			if (collectedSources.Count == 0)
 			{
+				var fallbackResponse = await TryKnowledgeFallbackAsync(request, cancellationToken);
+				if (fallbackResponse is not null)
+				{
+					return Ok(fallbackResponse);
+				}
+
 				return Ok(new ChatResponse(
 					"I could not retrieve reliable structured or knowledge-base data for this request.",
 					Array.Empty<ChatSource>()));
@@ -167,6 +187,134 @@ public sealed class ChatController : ControllerBase
 		}
 	}
 
+	private async Task<ChatResponse?> TryKnowledgeFallbackAsync(ChatRequest request, CancellationToken cancellationToken)
+	{
+		var queries = BuildKnowledgeFallbackQueries(request.Message);
+		var candidates = new List<KnowledgeSearchResult>();
+
+		foreach (var query in queries)
+		{
+			var queryResults = await _knowledgeBaseService.SearchAsync(query, 3, cancellationToken);
+			candidates.AddRange(queryResults);
+		}
+
+		var deduplicatedResults = candidates
+			.GroupBy(result => result.ChunkId, StringComparer.Ordinal)
+			.Select(group => group.OrderByDescending(result => result.Score).First())
+			.ToArray();
+
+		var isPolicyQuestion = IsPolicyQuestion(request.Message);
+		var relevantResults = deduplicatedResults
+			.Where(result => !isPolicyQuestion || IsPolicyRelevant(result))
+			.Where(result => isPolicyQuestion || result.Score >= KnowledgeFallbackMinScore)
+			.Where(result => result.Score >= MinimumUnstructuredSourceScore)
+			.OrderByDescending(result => result.Score)
+			.Take(3)
+			.ToArray();
+
+		if (relevantResults.Length == 0)
+		{
+			return null;
+		}
+
+		var snippets = string.Join(
+			"\n\n",
+			relevantResults.Select((result, index) =>
+				$"[{index + 1}] Source: {result.Source} ({result.ChunkId})\nContent: {result.Content}"));
+
+		var synthesisConversation = new List<DialChatMessage>
+		{
+			new("system", "Answer strictly from the provided snippets. If snippets are insufficient, state that clearly."),
+			new("user", $"Question: {request.Message}\n\nKnowledge snippets:\n{snippets}")
+		};
+
+		var synthesisResponse = await _dialApiService.SendChatCompletionRequestAsync(
+			request.DeploymentName,
+			synthesisConversation,
+			request.Temperature,
+			request.MaxTokens,
+			null,
+			null,
+			null,
+			cancellationToken);
+
+		var answer = synthesisResponse.Choices.FirstOrDefault()?.Message?.Content
+			?? "I could not retrieve reliable structured or knowledge-base data for this request.";
+
+		var sources = relevantResults
+			.Select(result => new ChatSource("unstructured", result.Source, result.ChunkId, result.Score))
+			.ToArray();
+
+		return new ChatResponse(answer, sources);
+	}
+
+	private static IReadOnlyCollection<string> BuildKnowledgeFallbackQueries(string message)
+	{
+		var queries = new List<string> { message };
+		var normalized = message.ToLowerInvariant();
+
+		if (ContainsAny(normalized, "delivery", "shipping", "home delivery", "házhozszáll", "szállítás", "kiszáll"))
+		{
+			queries.Add("delivery policy shipping time home delivery");
+		}
+
+		if (ContainsAny(normalized, "return", "refund", "visszaküld", "vissza", "elállás"))
+		{
+			queries.Add("returns policy refund");
+		}
+
+		if (ContainsAny(normalized, "opening", "hours", "open", "nyitva", "nyitvatart"))
+		{
+			queries.Add("opening hours");
+		}
+
+		if (ContainsAny(normalized, "payment", "pay", "fizet", "bankkártya", "cash", "card"))
+		{
+			queries.Add("payment methods");
+		}
+
+		return queries
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+	}
+
+	private static bool IsPolicyQuestion(string message)
+	{
+		var normalized = message.ToLowerInvariant();
+		return ContainsAny(normalized,
+			"delivery", "shipping", "home delivery", "returns", "return", "refund", "opening", "hours", "payment",
+			"házhozszáll", "szállítás", "kiszáll", "visszaküld", "vissza", "nyitvatart", "nyitva", "fizet");
+	}
+
+	private static bool ContainsAny(string value, params string[] tokens)
+	{
+		foreach (var token in tokens)
+		{
+			if (value.Contains(token, StringComparison.Ordinal))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private static bool IsPolicyRelevant(KnowledgeSearchResult result)
+	{
+		var source = result.Source.ToLowerInvariant();
+		var content = result.Content.ToLowerInvariant();
+
+		foreach (var keyword in PolicyKeywords)
+		{
+			if (source.Contains(keyword, StringComparison.Ordinal) || content.Contains(keyword, StringComparison.Ordinal))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	/// <summary>
 	/// Alias route for chat completion orchestration with mixed tool support.
 	/// </summary>
@@ -196,8 +344,11 @@ public sealed class ChatController : ControllerBase
 		{
 			var (query, topK) = ParseKnowledgeArguments(toolCall.Function.Arguments, originalMessage);
 			var results = await _knowledgeBaseService.SearchAsync(query, topK, cancellationToken);
+			var filteredResults = results
+				.Where(result => result.Score >= MinimumUnstructuredSourceScore)
+				.ToArray();
 
-			var sources = results
+			var sources = filteredResults
 				.Select(result => new ChatSource("unstructured", result.Source, result.ChunkId, result.Score))
 				.ToArray();
 
@@ -205,7 +356,7 @@ public sealed class ChatController : ControllerBase
 			{
 				query,
 				topK,
-				results = results.Select(result => new
+				results = filteredResults.Select(result => new
 				{
 					result.Source,
 					result.ChunkId,
