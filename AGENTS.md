@@ -202,7 +202,7 @@ Status: Done
 
 ### Milestone 5
 
-Status: Planned
+Status: Done
 
 - Support mixed structured and unstructured questions.
 - Create the Angular chat frontend.

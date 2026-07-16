@@ -65,7 +65,7 @@ The `backend`, `frontend`, and `data` folders will be created during implementat
 2. [Done] Import sample product data and implement product search.
 3. [Done] Integrate the EPAM DIAL API and tool calling.
 4. [Done] Add document ingestion, embeddings, and semantic retrieval.
-5. [Planned] Add mixed structured and unstructured question support.
+5. [Done] Add mixed structured and unstructured question support.
 6. [Planned] Create a simple Angular chat interface.
 7. [Planned] Add automated tests, documentation, and final demo materials.
 
@@ -117,6 +117,34 @@ Example search request:
 {
 	"query": "Do you offer home delivery?",
 	"topK": 3
+}
+```
+
+## Mixed Query Orchestration API
+
+The backend now supports mixed structured and unstructured questions through orchestrated tool-calling:
+
+- `POST /api/chat`
+- `POST /api/chat-completion`
+
+Available tools in mixed orchestration:
+
+- `SearchProducts` for structured SQL product retrieval.
+- `SearchKnowledgeBase` for unstructured Markdown semantic retrieval.
+
+Sources are labeled in the response as:
+
+- `structured` for SQL product data.
+- `unstructured` for Markdown knowledge chunks.
+
+Example mixed query request:
+
+```json
+{
+	"deploymentName": "gpt-4-turbo-deployment",
+	"message": "Which beginner-friendly sunny balcony plants are in stock, and how should I care for them?",
+	"temperature": 0.2,
+	"maxTokens": 300
 }
 ```
 

@@ -3,6 +3,7 @@ using GardenBuddy.Api.Controllers;
 using GardenBuddy.Application.Abstractions;
 using GardenBuddy.Application.Dial;
 using GardenBuddy.Application.Knowledge;
+using GardenBuddy.Application.Products;
 using Microsoft.AspNetCore.Mvc;
 
 namespace GardenBuddy.Tests;
@@ -48,7 +49,8 @@ public class ChatControllerTests
 			}
 		};
 
-		var controller = new ChatController(dial, knowledge);
+		var products = new FakeProductService();
+		var controller = new ChatController(dial, knowledge, products);
 		var result = await controller.PostAsync(new ChatRequest("gpt-4-turbo-deployment", "Do you offer home delivery?"), CancellationToken.None);
 
 		var ok = Assert.IsType<OkObjectResult>(result);
@@ -60,9 +62,74 @@ public class ChatControllerTests
 	}
 
 	[Fact]
+	public async Task PostAsync_ExecutesMixedTools_AndReturnsLabeledSources()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_products",
+								"function",
+								new DialToolFunction("SearchProducts", "{\"category\":\"Plant\",\"inStockOnly\":true,\"topK\":2}")),
+							new DialToolCall(
+								"call_knowledge",
+								"function",
+								new DialToolFunction("SearchKnowledgeBase", "{\"query\":\"lavender care\",\"topK\":2}"))
+						}),
+					"tool_calls")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Lavender is in stock and should be watered infrequently."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService
+		{
+			Results = new[]
+			{
+				new KnowledgeSearchResult("plant-care.md", "plant-care.md#chunk-1", "Water deeply but infrequently.", 0.86)
+			}
+		};
+
+		var products = new FakeProductService
+		{
+			Results = new[]
+			{
+				new ProductSearchResult(1, "Lavender", "Plant", "Fragrant perennial", 12.99m, 18, "Full Sun", "Low", "Beginner", false, true, "Non-toxic")
+			}
+		};
+
+		var controller = new ChatController(dial, knowledge, products);
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "Which beginner-friendly sunny balcony plants are in stock, and how should I care for them?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Equal(2, payload.Sources.Count);
+		Assert.Contains(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
+		Assert.Contains(payload.Sources, source => source.Kind == "unstructured" && source.Source == "plant-care.md");
+		Assert.Equal(2, dial.CallCount);
+	}
+
+	[Fact]
 	public async Task PostAsync_ReturnsBadRequest_WhenMessageMissing()
 	{
-		var controller = new ChatController(new FakeDialApiService(), new FakeKnowledgeBaseService());
+		var controller = new ChatController(new FakeDialApiService(), new FakeKnowledgeBaseService(), new FakeProductService());
 		var result = await controller.PostAsync(new ChatRequest("dep", ""), CancellationToken.None);
 
 		Assert.IsType<BadRequestObjectResult>(result);
@@ -109,6 +176,16 @@ public class ChatControllerTests
 		}
 
 		public Task<IReadOnlyCollection<KnowledgeSearchResult>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
+		{
+			return Task.FromResult(Results);
+		}
+	}
+
+	private sealed class FakeProductService : IProductService
+	{
+		public IReadOnlyCollection<ProductSearchResult> Results { get; set; } = Array.Empty<ProductSearchResult>();
+
+		public Task<IReadOnlyCollection<ProductSearchResult>> SearchAsync(ProductSearchCriteria criteria, CancellationToken cancellationToken = default)
 		{
 			return Task.FromResult(Results);
 		}

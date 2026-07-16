@@ -2,9 +2,11 @@ using System.Net.Http.Headers;
 using GardenBuddy.Application.Abstractions;
 using GardenBuddy.Application.Configuration;
 using GardenBuddy.Infrastructure.Configuration;
+using GardenBuddy.Infrastructure.Persistence;
 using GardenBuddy.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 
 namespace GardenBuddy.Infrastructure.DependencyInjection;
 
@@ -23,6 +25,11 @@ public static class ServiceCollectionExtensions
 			.AddOptions<KnowledgeOptions>()
 			.Bind(configuration.GetSection(KnowledgeOptions.SectionName))
 			.ValidateDataAnnotations();
+
+		var connectionString = configuration.GetConnectionString("DefaultConnection")
+			?? "Data Source=data/products/gardenbuddy.dev.db";
+
+		services.AddDbContext<GardenBuddyDbContext>(options => options.UseSqlite(connectionString));
 
 		services.AddHttpClient<IDialApiService, DialApiService>((serviceProvider, client) =>
 		{
@@ -58,6 +65,7 @@ public static class ServiceCollectionExtensions
 		});
 
 		services.AddSingleton<IKnowledgeBaseService, KnowledgeBaseService>();
+		services.AddScoped<IProductService, ProductService>();
 
 		return services;
 	}
