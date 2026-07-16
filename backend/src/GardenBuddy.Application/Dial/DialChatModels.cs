@@ -5,7 +5,8 @@ namespace GardenBuddy.Application.Dial;
 public sealed record DialChatMessage(
     [property: JsonPropertyName("role")] string Role,
     [property: JsonPropertyName("content")] string? Content,
-    [property: JsonPropertyName("tool_calls")] IReadOnlyCollection<DialToolCall>? ToolCalls = null);
+    [property: JsonPropertyName("tool_calls")] IReadOnlyCollection<DialToolCall>? ToolCalls = null,
+    [property: JsonPropertyName("tool_call_id")] string? ToolCallId = null);
 
 public sealed record DialToolFunction(
     [property: JsonPropertyName("name")] string Name,

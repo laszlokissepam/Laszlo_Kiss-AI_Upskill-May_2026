@@ -192,7 +192,7 @@ Current implementation notes:
 
 ### Milestone 4
 
-Status: Planned
+Status: Done
 
 - Ingest Markdown documents.
 - Split documents into searchable chunks.

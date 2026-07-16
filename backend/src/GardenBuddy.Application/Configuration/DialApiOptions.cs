@@ -22,5 +22,11 @@ public sealed class DialApiOptions
 	public string DefaultModel { get; set; } = "gpt-4";
 
 	[Required]
+	public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+
+	[Required]
+	public string EmbeddingDeploymentName { get; set; } = "text-embedding-3-small";
+
+	[Required]
 	public string CachePolicy { get; set; } = "availability-priority";
 }

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using GardenBuddy.Application.Abstractions;
 using GardenBuddy.Application.Configuration;
+using GardenBuddy.Infrastructure.Configuration;
 using GardenBuddy.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,11 @@ public static class ServiceCollectionExtensions
 			.ValidateDataAnnotations()
 			.Validate(options => Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps,
 				"Dial:BaseUrl must be a valid HTTPS URL.");
+
+		services
+			.AddOptions<KnowledgeOptions>()
+			.Bind(configuration.GetSection(KnowledgeOptions.SectionName))
+			.ValidateDataAnnotations();
 
 		services.AddHttpClient<IDialApiService, DialApiService>((serviceProvider, client) =>
 		{
@@ -39,6 +45,19 @@ public static class ServiceCollectionExtensions
 				client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 			}
 		});
+
+		services.AddHttpClient<IEmbeddingService, DialEmbeddingService>((serviceProvider, client) =>
+		{
+			var options = serviceProvider
+				.GetRequiredService<Microsoft.Extensions.Options.IOptions<DialApiOptions>>()
+				.Value;
+
+			client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
+			client.DefaultRequestHeaders.Accept.Clear();
+			client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+		});
+
+		services.AddSingleton<IKnowledgeBaseService, KnowledgeBaseService>();
 
 		return services;
 	}

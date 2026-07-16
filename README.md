@@ -64,7 +64,7 @@ The `backend`, `frontend`, and `data` folders will be created during implementat
 1. [Done] Create the ASP.NET Core solution and SQL data layer.
 2. [Done] Import sample product data and implement product search.
 3. [Done] Integrate the EPAM DIAL API and tool calling.
-4. [Planned] Add document ingestion, embeddings, and semantic retrieval.
+4. [Done] Add document ingestion, embeddings, and semantic retrieval.
 5. [Planned] Add mixed structured and unstructured question support.
 6. [Planned] Create a simple Angular chat interface.
 7. [Planned] Add automated tests, documentation, and final demo materials.
@@ -99,6 +99,26 @@ Request validation and failure handling:
 - Enforces tool definition limits (maximum 128 tools) and validates tool schema consistency.
 - Resolves API key from `DIAL_API_KEY` first, then falls back to `Dial:ApiKey`.
 - Maps provider failures (`400`, `401`, `500`) into controlled API errors.
+
+## Knowledge Retrieval API
+
+Semantic retrieval is available through dedicated backend endpoints:
+
+- `POST /api/knowledge/ingest`
+- `POST /api/knowledge/search`
+
+`/api/knowledge/ingest` reads Markdown files from `data/knowledge`, splits them into reusable chunks, and generates embeddings using the DIAL embedding endpoint.
+
+`/api/knowledge/search` generates a query embedding and returns top-ranked chunks by cosine similarity.
+
+Example search request:
+
+```json
+{
+	"query": "Do you offer home delivery?",
+	"topK": 3
+}
+```
 
 Sample environment setup:
 
