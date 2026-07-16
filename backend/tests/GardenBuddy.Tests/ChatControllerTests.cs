@@ -135,6 +135,103 @@ public class ChatControllerTests
 		Assert.IsType<BadRequestObjectResult>(result);
 	}
 
+	[Fact]
+	public async Task PostAsync_EnforcesToolCall_WhenInitialAssistantReplyHasNoToolCalls()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "General guidance without sources."), "stop")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_products",
+								"function",
+								new DialToolFunction("SearchProducts", "{\"name\":\"lavender\",\"inStockOnly\":true,\"topK\":1}"))
+						}),
+					"tool_calls")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"3",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Lavender is in stock."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService();
+		var products = new FakeProductService
+		{
+			Results = new[]
+			{
+				new ProductSearchResult(1, "Lavender", "Plant", "Fragrant perennial", 12.99m, 18, "Full Sun", "Low", "Beginner", false, true, "Non-toxic")
+			}
+		};
+
+		var controller = new ChatController(dial, knowledge, products);
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "Mely kezdőbarát, napos erkélyre való növények vannak raktáron?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Single(payload.Sources);
+		Assert.Contains(payload.Sources, source => source.Kind == "structured");
+		Assert.Equal(3, dial.CallCount);
+	}
+
+	[Fact]
+	public async Task PostAsync_ReturnsFallback_WhenToolCallsYieldNoSources()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_products",
+								"function",
+								new DialToolFunction("SearchProducts", "{\"name\":\"lavender\",\"inStockOnly\":true,\"topK\":3}"))
+						}),
+					"tool_calls")
+			}));
+
+		var controller = new ChatController(dial, new FakeKnowledgeBaseService(), new FakeProductService());
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "Mely kezdőbarát, napos erkélyre való növények vannak raktáron?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Contains("could not retrieve reliable", payload.Answer, StringComparison.OrdinalIgnoreCase);
+		Assert.Empty(payload.Sources);
+		Assert.Equal(1, dial.CallCount);
+	}
+
 	private sealed class FakeDialApiService : IDialApiService
 	{
 		private readonly Queue<DialChatCompletionResponse> _responses = new();

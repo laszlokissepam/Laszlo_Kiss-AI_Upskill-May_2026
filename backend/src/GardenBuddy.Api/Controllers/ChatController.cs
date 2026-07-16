@@ -89,17 +89,46 @@ public sealed class ChatController : ControllerBase
 				return StatusCode(StatusCodes.Status500InternalServerError, new ChatErrorResponse("Assistant returned no choices."));
 			}
 
-			conversation.Add(new DialChatMessage("assistant", firstAssistant.Content, firstAssistant.ToolCalls));
 			if (firstAssistant.ToolCalls is null || firstAssistant.ToolCalls.Count == 0)
 			{
-				return Ok(new ChatResponse(firstAssistant.Content ?? string.Empty, collectedSources));
+				var forcedToolResponse = await _dialApiService.SendChatCompletionRequestAsync(
+					request.DeploymentName,
+					conversation,
+					request.Temperature,
+					request.MaxTokens,
+					tools,
+					"required",
+					false,
+					cancellationToken);
+
+				firstAssistant = forcedToolResponse.Choices.FirstOrDefault()?.Message;
+				if (firstAssistant is null)
+				{
+					return StatusCode(StatusCodes.Status500InternalServerError, new ChatErrorResponse("Assistant returned no choices after tool enforcement."));
+				}
+
+				if (firstAssistant.ToolCalls is null || firstAssistant.ToolCalls.Count == 0)
+				{
+					return Ok(new ChatResponse(
+						"I could not retrieve reliable structured or knowledge-base data for this request.",
+						Array.Empty<ChatSource>()));
+				}
 			}
+
+			conversation.Add(new DialChatMessage("assistant", firstAssistant.Content, firstAssistant.ToolCalls));
 
 			foreach (var toolCall in firstAssistant.ToolCalls)
 			{
 				var toolResult = await ExecuteToolCallAsync(toolCall, request.Message, cancellationToken);
 				conversation.Add(new DialChatMessage("tool", toolResult.SerializedContent, ToolCallId: toolCall.Id));
 				collectedSources.AddRange(toolResult.Sources);
+			}
+
+			if (collectedSources.Count == 0)
+			{
+				return Ok(new ChatResponse(
+					"I could not retrieve reliable structured or knowledge-base data for this request.",
+					Array.Empty<ChatSource>()));
 			}
 
 			var finalResponse = await _dialApiService.SendChatCompletionRequestAsync(

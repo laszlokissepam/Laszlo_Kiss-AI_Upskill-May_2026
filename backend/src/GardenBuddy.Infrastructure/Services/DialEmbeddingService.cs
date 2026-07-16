@@ -40,6 +40,8 @@ public sealed class DialEmbeddingService : IEmbeddingService
 		};
 
 		request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ResolveApiKey());
+		request.Headers.Remove("Api-Key");
+		request.Headers.Add("Api-Key", ResolveApiKey());
 		request.Headers.Remove("X-CACHE-POLICY");
 		request.Headers.Add("X-CACHE-POLICY", _options.CachePolicy);
 

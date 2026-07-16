@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GardenBuddy.Application.Abstractions;
 using GardenBuddy.Application.Configuration;
 using GardenBuddy.Application.Dial;
@@ -22,7 +23,10 @@ public sealed class DialApiService : IDialApiService
 		"required"
 	};
 
-	private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+	private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+	{
+		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+	};
 
 	private readonly HttpClient _httpClient;
 	private readonly DialApiOptions _options;
@@ -64,6 +68,8 @@ public sealed class DialApiService : IDialApiService
 		};
 
 		request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ResolveApiKey());
+		request.Headers.Remove("Api-Key");
+		request.Headers.Add("Api-Key", ResolveApiKey());
 		request.Headers.Remove("X-CACHE-POLICY");
 		request.Headers.Add("X-CACHE-POLICY", _options.CachePolicy);
 
@@ -320,7 +326,7 @@ public sealed class DialApiService : IDialApiService
 
 	private static DialApiException CreateException(HttpStatusCode statusCode, string responseBody)
 	{
-		var message = statusCode switch
+		var baseMessage = statusCode switch
 		{
 			HttpStatusCode.BadRequest => "DIAL API request was invalid (400 Bad Request).",
 			HttpStatusCode.Unauthorized => "DIAL API authentication failed (401 Unauthorized).",
@@ -328,6 +334,63 @@ public sealed class DialApiService : IDialApiService
 			_ => $"DIAL API request failed with status code {(int)statusCode}."
 		};
 
+		var providerMessage = TryExtractProviderErrorMessage(responseBody);
+		var message = string.IsNullOrWhiteSpace(providerMessage)
+			? baseMessage
+			: $"{baseMessage} Provider message: {providerMessage}";
+
 		return new DialApiException(statusCode, message, responseBody);
+	}
+
+	private static string? TryExtractProviderErrorMessage(string responseBody)
+	{
+		if (string.IsNullOrWhiteSpace(responseBody))
+		{
+			return null;
+		}
+
+		try
+		{
+			using var document = JsonDocument.Parse(responseBody);
+			var root = document.RootElement;
+
+			if (root.ValueKind == JsonValueKind.Object)
+			{
+				if (root.TryGetProperty("error", out var errorElement))
+				{
+					if (errorElement.ValueKind == JsonValueKind.String)
+					{
+						return errorElement.GetString();
+					}
+
+					if (errorElement.ValueKind == JsonValueKind.Object)
+					{
+						if (errorElement.TryGetProperty("message", out var messageElement)
+							&& messageElement.ValueKind == JsonValueKind.String)
+						{
+							return messageElement.GetString();
+						}
+
+						if (errorElement.TryGetProperty("detail", out var detailElement)
+							&& detailElement.ValueKind == JsonValueKind.String)
+						{
+							return detailElement.GetString();
+						}
+					}
+				}
+
+				if (root.TryGetProperty("message", out var rootMessageElement)
+					&& rootMessageElement.ValueKind == JsonValueKind.String)
+				{
+					return rootMessageElement.GetString();
+				}
+			}
+		}
+		catch (JsonException)
+		{
+			// Non-JSON provider errors are already logged via response snippet.
+		}
+
+		return null;
 	}
 }
