@@ -1,7 +1,11 @@
 using System.Reflection;
 using GardenBuddy.Api.Controllers;
+using GardenBuddy.Domain.Entities;
 using GardenBuddy.Infrastructure.DependencyInjection;
+using GardenBuddy.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ApplicationModels;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +28,21 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<GardenBuddyDbContext>();
+    try
+    {
+        await dbContext.Database.MigrateAsync();
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.Ordinal))
+    {
+        await dbContext.Database.EnsureCreatedAsync();
+    }
+
+    await SeedProductsIfNeededAsync(dbContext);
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -37,6 +56,91 @@ if (!app.Environment.IsDevelopment())
 app.MapControllers();
 
 app.Run();
+
+static async Task SeedProductsIfNeededAsync(GardenBuddyDbContext dbContext)
+{
+    if (await dbContext.Products.AnyAsync())
+    {
+        return;
+    }
+
+    var products = new[]
+    {
+        new Product
+        {
+            Name = "Lavender",
+            Category = "Plant",
+            Description = "Fragrant perennial herb suitable for sunny balconies.",
+            Price = 12.99m,
+            StockQuantity = 120,
+            SunlightRequirement = "Full Sun",
+            WateringRequirement = "Low",
+            Difficulty = "Beginner",
+            IsIndoor = false,
+            IsPerennial = true,
+            PetSafetyInfo = "Use caution around pets."
+        },
+        new Product
+        {
+            Name = "Geranium",
+            Category = "Plant",
+            Description = "Colorful flowering plant for bright balconies.",
+            Price = 9.49m,
+            StockQuantity = 80,
+            SunlightRequirement = "Full Sun",
+            WateringRequirement = "Medium",
+            Difficulty = "Beginner",
+            IsIndoor = false,
+            IsPerennial = false,
+            PetSafetyInfo = "Keep away from cats and dogs."
+        },
+        new Product
+        {
+            Name = "Rosemary",
+            Category = "Herb",
+            Description = "Aromatic herb that prefers sunny, dry conditions.",
+            Price = 7.99m,
+            StockQuantity = 65,
+            SunlightRequirement = "Full Sun",
+            WateringRequirement = "Low",
+            Difficulty = "Beginner",
+            IsIndoor = true,
+            IsPerennial = true,
+            PetSafetyInfo = "Non-toxic in small amounts."
+        },
+        new Product
+        {
+            Name = "Peace Lily",
+            Category = "Plant",
+            Description = "Popular indoor plant that tolerates low light.",
+            Price = 14.99m,
+            StockQuantity = 40,
+            SunlightRequirement = "Partial Shade",
+            WateringRequirement = "Medium",
+            Difficulty = "Beginner",
+            IsIndoor = true,
+            IsPerennial = true,
+            PetSafetyInfo = "Toxic to pets."
+        },
+        new Product
+        {
+            Name = "Basil",
+            Category = "Herb",
+            Description = "Fast-growing culinary herb.",
+            Price = 5.49m,
+            StockQuantity = 90,
+            SunlightRequirement = "Full Sun",
+            WateringRequirement = "Medium",
+            Difficulty = "Beginner",
+            IsIndoor = true,
+            IsPerennial = false,
+            PetSafetyInfo = "Pet-friendly."
+        }
+    };
+
+    await dbContext.Products.AddRangeAsync(products);
+    await dbContext.SaveChangesAsync();
+}
 
 internal sealed class PublicControllerConvention : IControllerModelConvention
 {

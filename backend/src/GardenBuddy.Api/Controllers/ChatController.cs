@@ -4,6 +4,8 @@ using GardenBuddy.Application.Dial;
 using GardenBuddy.Application.Knowledge;
 using GardenBuddy.Application.Products;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GardenBuddy.Api.Controllers;
 
@@ -19,12 +21,14 @@ public sealed class ChatController : ControllerBase
 	private readonly IDialApiService _dialApiService;
 	private readonly IKnowledgeBaseService _knowledgeBaseService;
     private readonly IProductService _productService;
+    private readonly ILogger<ChatController> _logger;
 
-	public ChatController(IDialApiService dialApiService, IKnowledgeBaseService knowledgeBaseService, IProductService productService)
+	public ChatController(IDialApiService dialApiService, IKnowledgeBaseService knowledgeBaseService, IProductService productService, ILogger<ChatController>? logger = null)
 	{
 		_dialApiService = dialApiService;
 		_knowledgeBaseService = knowledgeBaseService;
 		_productService = productService;
+		_logger = logger ?? NullLogger<ChatController>.Instance;
 	}
 
 	/// <summary>
@@ -182,6 +186,24 @@ public sealed class ChatController : ControllerBase
 					Array.Empty<ChatSource>()));
 			}
 
+			if (!collectedSources.Any(source => string.Equals(source.Kind, "structured", StringComparison.Ordinal)))
+			{
+				var structuredFallback = await ExecuteStructuredFallbackAsync(
+					request.DeploymentName,
+					request.Message,
+					request.Temperature,
+					request.MaxTokens,
+					conversation,
+					assistant.Content ?? string.Empty,
+					collectedSources,
+					cancellationToken);
+
+				if (structuredFallback is not null)
+				{
+					return Ok(structuredFallback);
+				}
+			}
+
 			var distinctSources = collectedSources
 				.DistinctBy(source => $"{source.Kind}:{source.Source}:{source.ItemId}")
 				.ToArray();
@@ -284,6 +306,122 @@ public sealed class ChatController : ControllerBase
 		return new ChatResponse(finalAssistant.Content ?? string.Empty, distinctSources);
 	}
 
+	private async Task<ChatResponse?> ExecuteStructuredFallbackAsync(
+		string deploymentName,
+		string originalMessage,
+		double temperature,
+		int maxTokens,
+		IReadOnlyCollection<DialChatMessage> conversation,
+		string currentAssistantAnswer,
+		IReadOnlyCollection<ChatSource> existingSources,
+		CancellationToken cancellationToken)
+	{
+		const string structuredFallbackToolCallId = "fallback_products";
+		var productToolCall = await GetForcedProductToolCallAsync(
+			deploymentName,
+			conversation,
+			temperature,
+			maxTokens,
+			cancellationToken)
+			?? new DialToolCall(
+				structuredFallbackToolCallId,
+				"function",
+				new DialToolFunction(SearchProductsTool, "{}"));
+
+		var productToolCallId = string.IsNullOrWhiteSpace(productToolCall.Id)
+			? structuredFallbackToolCallId
+			: productToolCall.Id;
+
+		var productResult = await ExecuteToolCallAsync(
+			new DialToolCall(
+				productToolCallId,
+				"function",
+				new DialToolFunction(SearchProductsTool, productToolCall.Function.Arguments)),
+			originalMessage,
+			cancellationToken);
+
+		if (productResult.Sources.Count == 0)
+		{
+			return null;
+		}
+
+		var fallbackConversation = new List<DialChatMessage>(conversation)
+		{
+			new(
+				"assistant",
+				null,
+				new[]
+				{
+					new DialToolCall(productToolCallId, "function", new DialToolFunction(SearchProductsTool, productToolCall.Function.Arguments))
+				}),
+			new("tool", productResult.SerializedContent, ToolCallId: productToolCallId)
+		};
+
+		var finalResponse = await _dialApiService.SendChatCompletionRequestAsync(
+			deploymentName,
+			fallbackConversation,
+			temperature,
+			maxTokens,
+			null,
+			null,
+			null,
+			cancellationToken);
+
+		var finalAssistant = finalResponse.Choices.FirstOrDefault()?.Message;
+		var answer = finalAssistant?.Content ?? currentAssistantAnswer;
+		var mergedSources = existingSources
+			.Concat(productResult.Sources)
+			.DistinctBy(source => $"{source.Kind}:{source.Source}:{source.ItemId}")
+			.ToArray();
+
+		return new ChatResponse(answer, mergedSources);
+	}
+
+	private async Task<DialToolCall?> GetForcedProductToolCallAsync(
+		string deploymentName,
+		IReadOnlyCollection<DialChatMessage> conversation,
+		double temperature,
+		int maxTokens,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var response = await _dialApiService.SendChatCompletionRequestAsync(
+				deploymentName,
+				conversation,
+				temperature,
+				maxTokens,
+				BuildChatTools(),
+				new
+				{
+					type = "function",
+					function = new
+					{
+						name = SearchProductsTool
+					}
+				},
+				false,
+				cancellationToken);
+
+			var assistant = response.Choices.FirstOrDefault()?.Message;
+			if (assistant?.ToolCalls is null || assistant.ToolCalls.Count == 0)
+			{
+				return null;
+			}
+
+			return assistant.ToolCalls.FirstOrDefault(toolCall =>
+				string.Equals(toolCall.Function.Name, SearchProductsTool, StringComparison.Ordinal));
+		}
+		catch (DialApiException)
+		{
+			return null;
+		}
+		catch (ArgumentException)
+		{
+			return null;
+		}
+	}
+
 	/// <summary>
 	/// Alias route for chat completion orchestration with mixed tool support.
 	/// </summary>
@@ -339,7 +477,24 @@ public sealed class ChatController : ControllerBase
 
 		if (string.Equals(toolCall.Function.Name, SearchProductsTool, StringComparison.Ordinal))
 		{
-			var criteria = ParseProductArguments(toolCall.Function.Arguments, originalMessage);
+			ProductSearchCriteria criteria;
+			try
+			{
+				criteria = ParseProductArguments(toolCall.Function.Arguments, originalMessage);
+			}
+			catch (JsonException ex)
+			{
+				_logger.LogWarning(ex, "Invalid JSON arguments for {ToolName}: {Arguments}", SearchProductsTool, toolCall.Function.Arguments);
+				var invalidPayload = JsonSerializer.Serialize(new { error = "Invalid tool arguments for SearchProducts." });
+				return new ToolExecutionResult(invalidPayload, Array.Empty<ChatSource>());
+			}
+			catch (ArgumentException ex)
+			{
+				_logger.LogWarning(ex, "Invalid arguments for {ToolName}: {Arguments}", SearchProductsTool, toolCall.Function.Arguments);
+				var invalidPayload = JsonSerializer.Serialize(new { error = ex.Message });
+				return new ToolExecutionResult(invalidPayload, Array.Empty<ChatSource>());
+			}
+
 			var results = await _productService.SearchAsync(criteria, cancellationToken);
 
 			var sources = results
@@ -383,20 +538,34 @@ public sealed class ChatController : ControllerBase
 	{
 		if (string.IsNullOrWhiteSpace(arguments))
 		{
-			return new ProductSearchCriteria(Name: fallbackQuery, TopK: 5);
+			return new ProductSearchCriteria(Name: null, TopK: 10);
 		}
 
 		using var json = JsonDocument.Parse(arguments);
 		var root = json.RootElement;
+		if (root.ValueKind != JsonValueKind.Object)
+		{
+			throw new ArgumentException("Product tool arguments must be a JSON object.", nameof(arguments));
+		}
 
-		string? name = ReadString(root, "name") ?? ReadString(root, "query") ?? fallbackQuery;
+		string? name = ReadString(root, "name") ?? ReadString(root, "query");
 		string? category = ReadString(root, "category");
 		string? sunlightRequirement = ReadString(root, "sunlightRequirement");
 		string? difficulty = ReadString(root, "difficulty");
 		decimal? minPrice = ReadDecimal(root, "minPrice");
 		decimal? maxPrice = ReadDecimal(root, "maxPrice");
+		if (minPrice.HasValue && maxPrice.HasValue && minPrice > maxPrice)
+		{
+			throw new ArgumentException("minPrice cannot be greater than maxPrice.", nameof(arguments));
+		}
+
 		bool? inStockOnly = ReadBool(root, "inStockOnly");
 		var topK = ReadInt(root, "topK") ?? 5;
+
+		if (!HasAnyProductFilter(name, category, sunlightRequirement, difficulty, minPrice, maxPrice, inStockOnly))
+		{
+			return new ProductSearchCriteria(Name: null, TopK: Math.Clamp(topK, 1, 10));
+		}
 
 		return new ProductSearchCriteria(
 			Name: name,
@@ -407,6 +576,24 @@ public sealed class ChatController : ControllerBase
 			MaxPrice: maxPrice,
 			InStockOnly: inStockOnly,
 			TopK: Math.Clamp(topK, 1, 10));
+	}
+
+	private static bool HasAnyProductFilter(
+		string? name,
+		string? category,
+		string? sunlightRequirement,
+		string? difficulty,
+		decimal? minPrice,
+		decimal? maxPrice,
+		bool? inStockOnly)
+	{
+		return !string.IsNullOrWhiteSpace(name)
+			|| !string.IsNullOrWhiteSpace(category)
+			|| !string.IsNullOrWhiteSpace(sunlightRequirement)
+			|| !string.IsNullOrWhiteSpace(difficulty)
+			|| minPrice.HasValue
+			|| maxPrice.HasValue
+			|| inStockOnly.HasValue;
 	}
 
 	private static IReadOnlyCollection<DialToolDefinition> BuildChatTools()
