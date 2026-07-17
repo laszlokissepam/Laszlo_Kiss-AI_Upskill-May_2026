@@ -495,6 +495,20 @@ public sealed class ChatController : ControllerBase
 				return new ToolExecutionResult(invalidPayload, Array.Empty<ChatSource>());
 			}
 
+			if (!HasAnyProductFilter(
+				criteria.Name,
+				criteria.Category,
+				criteria.SunlightRequirement,
+				criteria.Difficulty,
+				criteria.MinPrice,
+				criteria.MaxPrice,
+				criteria.InStockOnly))
+			{
+				_logger.LogWarning("SearchProducts was called without filters. Arguments: {Arguments}", toolCall.Function.Arguments);
+				var invalidPayload = JsonSerializer.Serialize(new { error = "SearchProducts requires at least one filter argument." });
+				return new ToolExecutionResult(invalidPayload, Array.Empty<ChatSource>());
+			}
+
 			var results = await _productService.SearchAsync(criteria, cancellationToken);
 
 			var sources = results

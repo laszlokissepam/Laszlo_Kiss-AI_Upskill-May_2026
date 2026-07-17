@@ -287,7 +287,7 @@ public class ChatControllerTests
 	}
 
 	[Fact]
-	public async Task PostAsync_BroadFallback_DoesNotUseWholeMessageAsProductName_WhenToolArgsAreEmptyObject()
+	public async Task PostAsync_BroadFallback_DoesNotReturnStructuredRows_WhenToolArgsAreEmptyObject()
 	{
 		var dial = new FakeDialApiService();
 		dial.QueueResponse(new DialChatCompletionResponse(
@@ -333,9 +333,8 @@ public class ChatControllerTests
 
 		var ok = Assert.IsType<OkObjectResult>(result);
 		var payload = Assert.IsType<ChatResponse>(ok.Value);
-		Assert.Contains(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
-		Assert.NotNull(products.LastCriteria);
-		Assert.True(string.IsNullOrWhiteSpace(products.LastCriteria!.Name));
+		Assert.DoesNotContain(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
+		Assert.Null(products.LastCriteria);
 	}
 
 	private sealed class FakeDialApiService : IDialApiService
