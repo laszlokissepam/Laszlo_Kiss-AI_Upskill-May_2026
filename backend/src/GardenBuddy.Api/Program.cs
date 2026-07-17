@@ -1,9 +1,14 @@
 using System.Reflection;
+using GardenBuddy.Api.Controllers;
 using GardenBuddy.Infrastructure.DependencyInjection;
+using Microsoft.AspNetCore.Mvc.ApplicationModels;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Conventions.Add(new PublicControllerConvention());
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -32,3 +37,16 @@ if (!app.Environment.IsDevelopment())
 app.MapControllers();
 
 app.Run();
+
+internal sealed class PublicControllerConvention : IControllerModelConvention
+{
+    public void Apply(ControllerModel controller)
+    {
+        if (controller.ControllerType == typeof(DialController)
+            || controller.ControllerType == typeof(KnowledgeController))
+        {
+            controller.ApiExplorer.IsVisible = false;
+            controller.Actions.Clear();
+        }
+    }
+}
