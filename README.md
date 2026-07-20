@@ -68,6 +68,12 @@ The `backend`, `frontend`, and `data` folders will be created during implementat
 5. [Done] Add mixed structured and unstructured question support.
 6. [Done] Create a simple Angular chat interface.
 
+Milestone 6 includes a reusable standalone `ChatComponent` in `frontend/chat-component`
+and a minimal independently runnable host in `frontend/integration`. The host embeds the
+widget, uses SCSS, and exercises the real backend chat endpoint. Angular HTML templates
+use the built-in `@if`/`@for` control-flow syntax; Razor `.cshtml` is not supported by the
+Angular template compiler.
+
 ## Local Development
 
 Use two terminals: one for backend, one for frontend.
@@ -116,7 +122,8 @@ Notes:
 
 The backend integrates with the DIAL Core chat completion endpoint:
 
-- Base URL: `https://dialx.ai/api/v1`
+- Base URL: the configured EPAM DIAL Core gateway (the sample development configuration
+  uses `https://ai-proxy.lab.epam.com`)
 - Endpoint: `POST /openai/deployments/{deployment_name}/chat/completions`
 - Required query parameter: `api-version=2024-10-21`
 - Default header: `X-CACHE-POLICY: availability-priority`

@@ -228,6 +228,13 @@ public sealed class ChatController : ControllerBase
 		{
 			return StatusCode(StatusCodes.Status500InternalServerError, new ChatErrorResponse(ex.Message));
 		}
+		catch (HttpRequestException ex)
+		{
+			_logger.LogError(ex, "DIAL API is unreachable while processing a chat request.");
+			return StatusCode(
+				StatusCodes.Status503ServiceUnavailable,
+				new ChatErrorResponse("The AI service is temporarily unavailable. Please try again later."));
+		}
 	}
 
 	private async Task<ChatResponse?> ExecuteBroadFallbackAsync(

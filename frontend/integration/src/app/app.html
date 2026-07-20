@@ -1,11 +1,10 @@
 <main class="integration-page">
-  <section class="hero">
-    <p class="eyebrow">Green Oasis Future Website</p>
-    <h1>Embedded Assistant Preview</h1>
-    <p class="subtitle">
-      This integration app hosts the reusable standalone chat widget.
-    </p>
-  </section>
-
-  <app-chat></app-chat>
+  <app-chat
+    [chatApiUrl]="chatApiUrl"
+    [deploymentName]="deploymentName"
+    [companyName]="'Garden Oasis'"
+    [welcomeTitle]="welcomeTitle"
+    [welcomeDescription]="welcomeDescription"
+    [suggestions]="suggestions"
+  ></app-chat>
 </main>

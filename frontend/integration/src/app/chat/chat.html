@@ -1,0 +1,52 @@
+<section class="chat-shell" aria-label="Garden Buddy chat">
+  <header class="chat-header">
+    <span class="brand-name">Garden Buddy</span>
+    <span class="brand-badge" aria-hidden="true">GB</span>
+  </header>
+
+  <div #chatHistory class="chat-history" aria-live="polite">
+    @if (messages().length === 0) {
+      <div class="empty-state">
+        <p class="welcome-kicker">{{ companyName() }} AI assistant</p>
+        <h2>{{ welcomeTitle() }}</h2>
+        <p>{{ welcomeDescription() }}</p>
+      </div>
+      <div class="suggestions" aria-label="Suggested questions">
+        @for (suggestion of suggestions(); track suggestion) {
+          <button type="button" (click)="useSuggestion(suggestion.message)">
+            {{ suggestion.label }}
+          </button>
+        }
+      </div>
+    } @else {
+      @for (message of messages(); track message) {
+        <div class="message message-user"><p>{{ message.user }}</p></div>
+        <div class="message message-bot">
+          <span class="message-author">Garden Buddy</span>
+          <p>{{ message.bot }}</p>
+        </div>
+      }
+    }
+  </div>
+
+  <footer class="chat-footer">
+    @if (errorMessage()) {
+      <p class="error" role="alert">{{ errorMessage() }}</p>
+    }
+    <form class="chat-form" (ngSubmit)="sendMessage()">
+      <label class="visually-hidden" for="chat-message-input">Message</label>
+      <input
+        id="chat-message-input"
+        name="chatMessage"
+        type="text"
+        [(ngModel)]="inputMessage"
+        placeholder="Ask Garden Buddy"
+        autocomplete="off"
+      />
+      <button type="submit" [disabled]="!inputMessage.trim() || isSending()" aria-label="Send message">
+        @if (isSending()) { <span class="loader"></span> } @else { <span aria-hidden="true">↑</span> }
+      </button>
+    </form>
+    <p class="disclaimer">Garden Buddy can make mistakes. Check important plant-care advice.</p>
+  </footer>
+</section>

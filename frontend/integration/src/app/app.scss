@@ -1,0 +1,21 @@
+:host {
+	display: block;
+	min-height: 100dvh;
+	background:
+		radial-gradient(circle at 15% 15%, rgba(93, 139, 93, 0.18), transparent 28rem),
+		linear-gradient(135deg, #eef3ea, #dfe9dd);
+	color: #152015;
+	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.integration-page {
+	position: fixed;
+	right: 1.5rem;
+	bottom: 1.5rem;
+	box-sizing: border-box;
+	width: min(380px, calc(100vw - 3rem));
+}
+
+@media (max-width: 520px) {
+	.integration-page { inset: 0; width: 100%; }
+}
