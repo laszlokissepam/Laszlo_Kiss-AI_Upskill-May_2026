@@ -27,8 +27,8 @@ public sealed class ProductService : IProductService
 
 		if (!string.IsNullOrWhiteSpace(criteria.Name))
 		{
-			var name = criteria.Name.Trim();
-			query = query.Where(product => product.Name.Contains(name));
+			var normalizedName = criteria.Name.Trim().ToLower();
+			query = query.Where(product => product.Name.ToLower().Contains(normalizedName));
 		}
 
 		if (!string.IsNullOrWhiteSpace(criteria.Category))

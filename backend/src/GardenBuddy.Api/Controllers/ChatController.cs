@@ -16,12 +16,20 @@ public sealed class ChatController : ControllerBase
 {
 	private const string SearchProductsTool = "SearchProducts";
 	private const string SearchKnowledgeBaseTool = "SearchKnowledgeBase";
+	private const string OutsideCatalogMessage = "We do not sell this type of product at Green Oasis.";
+	private const string GardenProductUnavailableMessage = "This product is currently unavailable. Please try again later.";
+	private const string ChatSystemPrompt = """
+		You are Garden Buddy, the Green Oasis garden-center assistant.
+		For product prices, stock availability, categories, or product properties, always call SearchProducts and answer only from its structured results.
+		For store policies, FAQs, and gardening guidance, call SearchKnowledgeBase.
+		For questions requiring both product and guidance or policy data, call both tools.
+		Never invent prices, stock, policies, or product details. If a required tool returns no results, clearly state that the available data does not contain the answer.
+		""";
 	private const double MinimumUnstructuredSourceScore = 0.15;
 	private const int MaxToolRounds = 4;
 	private static readonly HashSet<string> ProductInferenceStopwords = new(StringComparer.OrdinalIgnoreCase)
 	{
-		"a", "an", "and", "are", "can", "cost", "do", "does", "for", "from", "how", "i", "in", "is", "it", "much", "need", "of", "on", "one", "or", "please", "price", "shipping", "the", "to", "what", "which", "with", "you", "your",
-		"egy", "es", "hogy", "is", "kell", "kerem", "mennyi", "mi", "mit", "most", "nekem", "szallit", "szallitas", "van", "vagy"
+		"a", "an", "and", "are", "can", "cost", "costs", "do", "does", "for", "from", "how", "i", "in", "is", "it", "much", "need", "of", "on", "one", "or", "please", "price", "shipping", "the", "to", "what", "which", "with", "you", "your"
 	};
 
 	private readonly IDialApiService _dialApiService;
@@ -76,8 +84,18 @@ public sealed class ChatController : ControllerBase
 			return BadRequest(new ChatErrorResponse("Message is required."));
 		}
 
+		var structuredPriceResponse = await TryHandleStructuredPriceQuestionAsync(
+			request.DeploymentName,
+			request.Message,
+			cancellationToken);
+		if (structuredPriceResponse is not null)
+		{
+			return Ok(structuredPriceResponse);
+		}
+
 		var conversation = new List<DialChatMessage>
 		{
+			new("system", ChatSystemPrompt),
 			new("user", request.Message)
 		};
 
@@ -135,7 +153,7 @@ public sealed class ChatController : ControllerBase
 					}
 
 					return Ok(new ChatResponse(
-						"I could not retrieve reliable structured or knowledge-base data for this request.",
+						await GetUnavailableCatalogMessageAsync(request.DeploymentName, request.Message, cancellationToken),
 						Array.Empty<ChatSource>()));
 				}
 			}
@@ -188,7 +206,7 @@ public sealed class ChatController : ControllerBase
 				}
 
 				return Ok(new ChatResponse(
-					"I could not retrieve reliable structured or knowledge-base data for this request.",
+					await GetUnavailableCatalogMessageAsync(request.DeploymentName, request.Message, cancellationToken),
 					Array.Empty<ChatSource>()));
 			}
 
@@ -235,6 +253,98 @@ public sealed class ChatController : ControllerBase
 				StatusCodes.Status503ServiceUnavailable,
 				new ChatErrorResponse("The AI service is temporarily unavailable. Please try again later."));
 		}
+	}
+
+	private async Task<ChatResponse?> TryHandleStructuredPriceQuestionAsync(
+		string deploymentName,
+		string message,
+		CancellationToken cancellationToken)
+	{
+		if (!LooksLikeStandalonePriceQuestion(message))
+		{
+			return null;
+		}
+
+		var inferredProduct = await TryInferProductCriteriaFromMessageAsync(message, cancellationToken);
+		var product = inferredProduct?.Results.FirstOrDefault();
+		if (product is null || product.StockQuantity <= 0)
+		{
+			return new ChatResponse(
+				await GetUnavailableCatalogMessageAsync(deploymentName, message, cancellationToken),
+				Array.Empty<ChatSource>());
+		}
+
+		return new ChatResponse(
+			$"{product.Name} costs {product.Price:0.00} and is currently in stock.",
+			new[]
+			{
+				new ChatSource("structured", "Products", product.Id.ToString(), 1.0)
+			});
+	}
+
+	private async Task<string> GetUnavailableCatalogMessageAsync(
+		string deploymentName,
+		string message,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var classificationConversation = new[]
+			{
+				new DialChatMessage(
+					"system",
+					"""
+					Classify the item requested by the user for a garden-center catalog.
+					Return exactly GARDEN_ITEM for plants, seeds, soil, pots, fertilizers, garden tools, pest control, or other products normally sold by a garden center.
+					Return exactly OUTSIDE_CATALOG for cars, electronics, clothing, unrelated services, and anything not normally sold by a garden center.
+					Return only one label and no explanation.
+					"""),
+				new DialChatMessage("user", message)
+			};
+
+			var response = await _dialApiService.SendChatCompletionRequestAsync(
+				deploymentName,
+				classificationConversation,
+				0,
+				20,
+				null,
+				null,
+				null,
+				cancellationToken);
+
+			var label = response.Choices.FirstOrDefault()?.Message.Content?.Trim();
+			return string.Equals(label, "OUTSIDE_CATALOG", StringComparison.OrdinalIgnoreCase)
+				? OutsideCatalogMessage
+				: GardenProductUnavailableMessage;
+		}
+		catch (DialApiException ex)
+		{
+			_logger.LogWarning(ex, "Catalog classification failed; using the safe garden-product fallback.");
+			return GardenProductUnavailableMessage;
+		}
+		catch (HttpRequestException ex)
+		{
+			_logger.LogWarning(ex, "Catalog classification service is unreachable; using the safe garden-product fallback.");
+			return GardenProductUnavailableMessage;
+		}
+	}
+
+	private static bool LooksLikeStandalonePriceQuestion(string message)
+	{
+		var hasPriceIntent = Regex.IsMatch(
+			message,
+			@"\b(price|cost|costs|how\s+much)\b",
+			RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+		if (!hasPriceIntent)
+		{
+			return false;
+		}
+
+		return !Regex.IsMatch(
+			message,
+			@"\b(care|water|sunlight|ship|shipping|deliver|delivery|return|policy)\w*\b",
+			RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 	}
 
 	private async Task<ChatResponse?> ExecuteBroadFallbackAsync(

@@ -197,7 +197,7 @@ public class ChatControllerTests
 	}
 
 	[Fact]
-	public async Task PostAsync_AddsStructuredFallback_WhenOnlyUnstructuredSourcesWereCollected()
+	public async Task PostAsync_ReturnsStructuredPriceWithoutCallingDial_ForStandalonePriceQuestion()
 	{
 		var dial = new FakeDialApiService();
 		dial.QueueResponse(new DialChatCompletionResponse(
@@ -280,10 +280,60 @@ public class ChatControllerTests
 
 		var ok = Assert.IsType<OkObjectResult>(result);
 		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Single(payload.Sources);
 		Assert.Contains(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
-		Assert.Contains(payload.Sources, source => source.Kind == "unstructured" && source.Source == "plant-care.md");
 		Assert.Contains("12.99", payload.Answer, StringComparison.Ordinal);
-		Assert.Equal(4, dial.CallCount);
+		Assert.Equal(0, dial.CallCount);
+	}
+
+	[Fact]
+	public async Task PostAsync_ReturnsUnavailableMessage_WhenPricedProductIsNotInStructuredData()
+	{
+		var dial = new FakeDialApiService();
+		var controller = new ChatController(
+			dial,
+			new FakeKnowledgeBaseService(),
+			new FakeProductService());
+
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "How much does a monstera cost?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Contains("currently unavailable", payload.Answer, StringComparison.OrdinalIgnoreCase);
+		Assert.Empty(payload.Sources);
+		Assert.Equal(1, dial.CallCount);
+	}
+
+	[Fact]
+	public async Task PostAsync_ReturnsOutsideCatalogMessage_ForNonGardenPriceQuestion()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"classification",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage("assistant", "OUTSIDE_CATALOG"),
+					"stop")
+			}));
+		var controller = new ChatController(
+			dial,
+			new FakeKnowledgeBaseService(),
+			new FakeProductService());
+
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "How much does a Ferrari cost?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Equal("We do not sell this type of product at Green Oasis.", payload.Answer);
+		Assert.Empty(payload.Sources);
+		Assert.Equal(1, dial.CallCount);
 	}
 
 	[Fact]

@@ -1,10 +1,32 @@
-# Ignore build output directories
-bin/
-obj/
+# .NET build and test output
+**/bin/
+**/obj/
+**/artifacts/
+TestResults/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.nupkg
+*.snupkg
+
+# Angular / Node build output and local caches
+**/node_modules/
+**/dist/
+**/.angular/
+coverage/
+.nyc_output/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Ignore local database files
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite3
 *.mdf
 *.ldf

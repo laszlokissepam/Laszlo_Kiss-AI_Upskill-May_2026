@@ -68,8 +68,8 @@ export class ChatComponent {
       this.updateBotAnswer(newMessage, answer);
     } catch (error: unknown) {
       console.error('Garden Buddy chat request failed.', error);
-      this.updateBotAnswer(newMessage, 'I could not reach the backend chat service right now.');
-      this.errorMessage.set('Backend call failed. Make sure the configured API is running and DIAL_API_KEY is set.');
+      this.updateBotAnswer(newMessage, 'Sorry, something went wrong. Please try again later.');
+      this.errorMessage.set(null);
     } finally {
       this.isSending.set(false);
     }
