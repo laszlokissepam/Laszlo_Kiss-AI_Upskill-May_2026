@@ -6,6 +6,7 @@ using GardenBuddy.Application.Products;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.RegularExpressions;
 
 namespace GardenBuddy.Api.Controllers;
 
@@ -17,6 +18,11 @@ public sealed class ChatController : ControllerBase
 	private const string SearchKnowledgeBaseTool = "SearchKnowledgeBase";
 	private const double MinimumUnstructuredSourceScore = 0.15;
 	private const int MaxToolRounds = 4;
+	private static readonly HashSet<string> ProductInferenceStopwords = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"a", "an", "and", "are", "can", "cost", "do", "does", "for", "from", "how", "i", "in", "is", "it", "much", "need", "of", "on", "one", "or", "please", "price", "shipping", "the", "to", "what", "which", "with", "you", "your",
+		"egy", "es", "hogy", "is", "kell", "kerem", "mennyi", "mi", "mit", "most", "nekem", "szallit", "szallitas", "van", "vagy"
+	};
 
 	private readonly IDialApiService _dialApiService;
 	private readonly IKnowledgeBaseService _knowledgeBaseService;
@@ -478,6 +484,7 @@ public sealed class ChatController : ControllerBase
 		if (string.Equals(toolCall.Function.Name, SearchProductsTool, StringComparison.Ordinal))
 		{
 			ProductSearchCriteria criteria;
+			IReadOnlyCollection<ProductSearchResult>? inferredResults = null;
 			try
 			{
 				criteria = ParseProductArguments(toolCall.Function.Arguments, originalMessage);
@@ -504,12 +511,28 @@ public sealed class ChatController : ControllerBase
 				criteria.MaxPrice,
 				criteria.InStockOnly))
 			{
-				_logger.LogWarning("SearchProducts was called without filters. Arguments: {Arguments}", toolCall.Function.Arguments);
-				var invalidPayload = JsonSerializer.Serialize(new { error = "SearchProducts requires at least one filter argument." });
-				return new ToolExecutionResult(invalidPayload, Array.Empty<ChatSource>());
+				var inferred = await TryInferProductCriteriaFromMessageAsync(originalMessage, cancellationToken);
+				if (inferred is null)
+				{
+					_logger.LogWarning("SearchProducts was called without filters and no product name could be inferred. Arguments: {Arguments}", toolCall.Function.Arguments);
+					var invalidPayload = JsonSerializer.Serialize(new { error = "SearchProducts requires at least one filter argument." });
+					return new ToolExecutionResult(invalidPayload, Array.Empty<ChatSource>());
+				}
+
+				criteria = inferred.Criteria;
+				inferredResults = inferred.Results;
 			}
 
-			var results = await _productService.SearchAsync(criteria, cancellationToken);
+			var results = inferredResults ?? await _productService.SearchAsync(criteria, cancellationToken);
+			if (results.Count == 0 && LooksLikeBroadNaturalLanguageName(criteria.Name))
+			{
+				var inferredFromMessage = await TryInferProductCriteriaFromMessageAsync(originalMessage, cancellationToken);
+				if (inferredFromMessage is not null)
+				{
+					criteria = inferredFromMessage.Criteria;
+					results = inferredFromMessage.Results;
+				}
+			}
 
 			var sources = results
 				.Select(result => new ChatSource("structured", "Products", result.Id.ToString(), 1.0))
@@ -686,7 +709,44 @@ public sealed class ChatController : ControllerBase
 		return null;
 	}
 
+	private async Task<InferredProductSearch?> TryInferProductCriteriaFromMessageAsync(string originalMessage, CancellationToken cancellationToken)
+	{
+		var tokenMatches = Regex.Matches(originalMessage, "[\\p{L}\\p{N}-]+")
+			.Select(match => match.Value.Trim())
+			.Where(token => token.Length >= 3)
+			.Where(token => !ProductInferenceStopwords.Contains(token))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.OrderByDescending(token => token.Length)
+			.Take(8)
+			.ToArray();
+
+		foreach (var token in tokenMatches)
+		{
+			var criteria = new ProductSearchCriteria(Name: token, TopK: 5);
+			var results = await _productService.SearchAsync(criteria, cancellationToken);
+			if (results.Count > 0)
+			{
+				_logger.LogInformation("Inferred product filter '{Token}' for SearchProducts fallback.", token);
+				return new InferredProductSearch(criteria, results);
+			}
+		}
+
+		return null;
+	}
+
+	private static bool LooksLikeBroadNaturalLanguageName(string? name)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+		{
+			return false;
+		}
+
+		var tokenCount = Regex.Matches(name, "[\\p{L}\\p{N}-]+").Count;
+		return tokenCount >= 4 || name.Contains('?', StringComparison.Ordinal);
+	}
+
 	private sealed record ToolExecutionResult(string SerializedContent, IReadOnlyCollection<ChatSource> Sources);
+	private sealed record InferredProductSearch(ProductSearchCriteria Criteria, IReadOnlyCollection<ProductSearchResult> Results);
 }
 
 public sealed record ChatRequest(

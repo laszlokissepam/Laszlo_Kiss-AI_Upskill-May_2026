@@ -1,0 +1,39 @@
+:host {
+	display: block;
+	min-height: 100vh;
+	background:
+		radial-gradient(circle at 12% 8%, rgba(125, 173, 93, 0.16) 0, transparent 38%),
+		radial-gradient(circle at 88% 92%, rgba(68, 123, 67, 0.14) 0, transparent 34%),
+		#f2f7ee;
+	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+	color: #152015;
+}
+
+.integration-page {
+	max-width: 860px;
+	margin: 0 auto;
+	padding: 2rem 1rem 2.5rem;
+}
+
+.hero {
+	margin-bottom: 1rem;
+}
+
+.eyebrow {
+	margin: 0;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: #4f6551;
+	font-size: 0.78rem;
+	font-weight: 700;
+}
+
+h1 {
+	margin: 0.45rem 0 0;
+	font-size: clamp(1.4rem, 2.1vw, 2rem);
+}
+
+.subtitle {
+	margin: 0.45rem 0 0;
+	color: #4a5c4b;
+}

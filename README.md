@@ -66,12 +66,51 @@ The `backend`, `frontend`, and `data` folders will be created during implementat
 3. [Done] Integrate the EPAM DIAL API and tool calling.
 4. [Done] Add document ingestion, embeddings, and semantic retrieval.
 5. [Done] Add mixed structured and unstructured question support.
-6. [Planned] Create a simple Angular chat interface.
-7. [Planned] Add automated tests, documentation, and final demo materials.
+6. [Done] Create a simple Angular chat interface.
 
 ## Local Development
 
-Setup and run instructions will be added after the project skeleton has been implemented.
+Use two terminals: one for backend, one for frontend.
+
+Backend (Terminal 1):
+
+1. Navigate to the API project folder:
+	```powershell
+	cd backend/src/GardenBuddy.Api
+	```
+2. Set your DIAL API key:
+	```powershell
+	$env:DIAL_API_KEY="your-token"
+	```
+3. Run the backend:
+	```powershell
+	dotnet run --launch-profile http
+	```
+4. Backend URLs:
+	- API base URL: `http://localhost:5078`
+	- Swagger UI: `http://localhost:5078/swagger`
+
+Frontend integration app (Terminal 2):
+
+1. Navigate to the integration app folder:
+	```powershell
+	cd frontend/integration
+	```
+2. Install dependencies (first run only):
+	```powershell
+	npm install
+	```
+3. Run the frontend:
+	```powershell
+	npm start
+	```
+4. Frontend URL:
+	- `http://localhost:4200`
+
+Notes:
+
+- The frontend chat widget calls the backend `POST /api/chat` endpoint.
+- Keep both terminals running while testing the chat UI.
 
 ## EPAM DIAL Integration
 

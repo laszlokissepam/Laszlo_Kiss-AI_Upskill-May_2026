@@ -8,10 +8,21 @@ using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+const string IntegrationCorsPolicy = "IntegrationFrontend";
 
 builder.Services.AddControllers(options =>
 {
     options.Conventions.Add(new PublicControllerConvention());
+});
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(IntegrationCorsPolicy, corsPolicy =>
+    {
+        corsPolicy
+            .WithOrigins("http://localhost:4200")
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -53,17 +64,13 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+app.UseCors(IntegrationCorsPolicy);
 app.MapControllers();
 
 app.Run();
 
 static async Task SeedProductsIfNeededAsync(GardenBuddyDbContext dbContext)
 {
-    if (await dbContext.Products.AnyAsync())
-    {
-        return;
-    }
-
     var products = new[]
     {
         new Product
@@ -138,7 +145,22 @@ static async Task SeedProductsIfNeededAsync(GardenBuddyDbContext dbContext)
         }
     };
 
-    await dbContext.Products.AddRangeAsync(products);
+    var existingNames = await dbContext.Products
+        .AsNoTracking()
+        .Select(product => product.Name)
+        .ToListAsync();
+
+    var existingNameSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+    var missingProducts = products
+        .Where(product => !existingNameSet.Contains(product.Name))
+        .ToArray();
+
+    if (missingProducts.Length == 0)
+    {
+        return;
+    }
+
+    await dbContext.Products.AddRangeAsync(missingProducts);
     await dbContext.SaveChangesAsync();
 }
 

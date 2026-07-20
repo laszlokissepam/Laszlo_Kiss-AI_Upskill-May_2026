@@ -328,13 +328,137 @@ public class ChatControllerTests
 
 		var controller = new ChatController(dial, knowledge, products);
 		var result = await controller.PostAsync(
-			new ChatRequest("gpt-4-turbo-deployment", "How much one lavender cost and how fast can you ship it to me?"),
+			new ChatRequest("gpt-4-turbo-deployment", "How much a Ferrari cost?"),
 			CancellationToken.None);
 
 		var ok = Assert.IsType<OkObjectResult>(result);
 		var payload = Assert.IsType<ChatResponse>(ok.Value);
 		Assert.DoesNotContain(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
-		Assert.Null(products.LastCriteria);
+		Assert.NotNull(products.LastCriteria);
+	}
+
+	[Fact]
+	public async Task PostAsync_BroadFallback_InfersProductNameFromMessage_WhenToolArgsAreEmptyObject()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "I can answer directly."), "stop")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Still no tool call."), "stop")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"3",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Lavender price is available from catalog."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService();
+		var products = new FakeProductService
+		{
+			SearchHandler = criteria =>
+				string.Equals(criteria.Name, "lavender", StringComparison.OrdinalIgnoreCase)
+					? new[]
+					{
+						new ProductSearchResult(1, "Lavender", "Plant", "Fragrant perennial", 12.99m, 18, "Full Sun", "Low", "Beginner", false, true, "Non-toxic")
+					}
+					: Array.Empty<ProductSearchResult>()
+		};
+
+		var controller = new ChatController(dial, knowledge, products);
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "How much one lavender cost and how fast can you ship it to me?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Contains(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
+		Assert.NotNull(products.LastCriteria);
+		Assert.Equal("lavender", products.LastCriteria!.Name, ignoreCase: true);
+	}
+
+	[Fact]
+	public async Task PostAsync_RecoversWhenSearchProductsQueryContainsWholeSentence()
+	{
+		var dial = new FakeDialApiService();
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"1",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(
+					0,
+					new DialChatMessage(
+						"assistant",
+						null,
+						new[]
+						{
+							new DialToolCall(
+								"call_knowledge",
+								"function",
+								new DialToolFunction("SearchKnowledgeBase", "{\"query\":\"shipping\",\"topK\":2}")),
+							new DialToolCall(
+								"call_products",
+								"function",
+								new DialToolFunction("SearchProducts", "{\"query\":\"How much one lavender cost and how fast can you ship it to me?\"}"))
+						}),
+					"tool_calls")
+			}));
+
+		dial.QueueResponse(new DialChatCompletionResponse(
+			"2",
+			"gpt-4",
+			new[]
+			{
+				new DialChatCompletionChoice(0, new DialChatMessage("assistant", "Lavender is 12.99 and shipping is 1-3 business days."), "stop")
+			}));
+
+		var knowledge = new FakeKnowledgeBaseService
+		{
+			Results = new[]
+			{
+				new KnowledgeSearchResult("store-policies.md", "store-policies.md#chunk-1", "Shipping takes 1-3 business days.", 0.82)
+			}
+		};
+
+		var products = new FakeProductService
+		{
+			SearchHandler = criteria =>
+			{
+				if (string.Equals(criteria.Name, "lavender", StringComparison.OrdinalIgnoreCase))
+				{
+					return new[]
+					{
+						new ProductSearchResult(1, "Lavender", "Plant", "Fragrant perennial", 12.99m, 18, "Full Sun", "Low", "Beginner", false, true, "Non-toxic")
+					};
+				}
+
+				return Array.Empty<ProductSearchResult>();
+			}
+		};
+
+		var controller = new ChatController(dial, knowledge, products);
+		var result = await controller.PostAsync(
+			new ChatRequest("gpt-4-turbo-deployment", "How much one lavender cost and how fast can you ship it to me?"),
+			CancellationToken.None);
+
+		var ok = Assert.IsType<OkObjectResult>(result);
+		var payload = Assert.IsType<ChatResponse>(ok.Value);
+		Assert.Contains(payload.Sources, source => source.Kind == "structured" && source.Source == "Products");
+		Assert.Contains(payload.Sources, source => source.Kind == "unstructured" && source.Source == "store-policies.md");
+		Assert.Contains("12.99", payload.Answer, StringComparison.Ordinal);
 	}
 
 	private sealed class FakeDialApiService : IDialApiService

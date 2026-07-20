@@ -1,0 +1,38 @@
+<section class="chat-shell" aria-label="Garden Buddy chat">
+	<header class="chat-header">
+		<h2>Garden Buddy Chat</h2>
+		<p>Ask about products, plant care, or store policies.</p>
+		<p class="status" *ngIf="isSending">Sending message to backend...</p>
+		<p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+	</header>
+
+	<div class="chat-history" aria-live="polite">
+		<p class="empty-state" *ngIf="messages.length === 0">
+			Start a conversation to see responses here.
+		</p>
+
+		<article class="message-pair" *ngFor="let message of messages">
+			<div class="bubble bubble-user">
+				<span class="label">You</span>
+				<p>{{ message.user }}</p>
+			</div>
+			<div class="bubble bubble-bot">
+				<span class="label">Bot</span>
+				<p>{{ message.bot }}</p>
+			</div>
+		</article>
+	</div>
+
+	<form class="chat-form" (ngSubmit)="sendMessage()">
+		<label class="visually-hidden" for="chat-message-input">Message</label>
+		<input
+			id="chat-message-input"
+			name="chatMessage"
+			type="text"
+			[(ngModel)]="inputMessage"
+			placeholder="Type your question..."
+			autocomplete="off"
+		/>
+		<button type="submit" [disabled]="!inputMessage.trim() || isSending">Send</button>
+	</form>
+</section>
