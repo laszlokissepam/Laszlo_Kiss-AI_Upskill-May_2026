@@ -1,7 +1,7 @@
 # Garden Buddy integration app
 
-This minimal Angular application contains and verifies the standalone `ChatComponent` in
-`src/app/chat`.
+This minimal Angular application hosts and verifies the standalone `ChatComponent` from
+`../chat-component/src/chat`.
 
 The host configures the widget through its required `chatApiUrl` and `deploymentName`
 inputs. Every host must provide both values explicitly.
@@ -11,6 +11,7 @@ inputs. Every host must provide both values explicitly.
 Start the ASP.NET Core API on `http://localhost:5078`, then run:
 
 ```powershell
+cd ..
 npm install
 npm start
 ```

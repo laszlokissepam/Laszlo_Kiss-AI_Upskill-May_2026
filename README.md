@@ -98,9 +98,9 @@ Backend (Terminal 1):
 
 Frontend integration app (Terminal 2):
 
-1. Navigate to the integration app folder:
+1. Navigate to the shared frontend workspace:
 	```powershell
-	cd frontend/integration
+	cd frontend
 	```
 2. Install dependencies (first run only):
 	```powershell

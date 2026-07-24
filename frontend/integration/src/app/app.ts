@@ -1,5 +1,8 @@
 import { Component } from '@angular/core';
-import { ChatComponent, type ChatSuggestion } from './chat/chat';
+import {
+  ChatComponent,
+  type ChatSuggestion
+} from '../../../chat-component/src/chat/chat';
 
 @Component({
   selector: 'app-root',
